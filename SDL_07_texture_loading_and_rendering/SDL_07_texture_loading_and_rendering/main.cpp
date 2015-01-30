@@ -92,7 +92,7 @@ bool loadMedia()
 	bool success = true;
 
 	//Load PNG texture
-	gTexture = loadTexture("images/texture.png");
+	gTexture = loadTexture("textures/texture.png");
 	if (gTexture == NULL)
 	{
 		printf("Failed to load texture image!\n");
