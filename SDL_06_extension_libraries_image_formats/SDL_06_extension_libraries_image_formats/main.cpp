@@ -3,6 +3,7 @@ and may not be redistributed without written permission.*/
 
 //Using SDL, standard IO, and strings
 #include <SDL.h>
+#include <SDL_image.h>
 #include <stdio.h>
 #include <string>
 
@@ -67,8 +68,17 @@ bool init()
 		}
 		else
 		{
-			//Get window surface
-			gScreenSurface = SDL_GetWindowSurface(gWindow);
+			// initialize PNG loading
+			int imgFlags = IMG_INIT_PNG;
+			if (!(IMG_Init) & imgFlags)
+			{
+				printf("SDL image could not initialize! SDL_image error: %s\n", IMG_GetError());
+			}
+			else
+			{
+				//Get window surface
+				gScreenSurface = SDL_GetWindowSurface(gWindow);
+			}			
 		}
 	}
 
