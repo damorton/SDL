@@ -1,16 +1,50 @@
-/*This source code copyrighted by Lazy Foo' Productions (2004-2013)
+/*This source code copyrighted by Lazy Foo' Productions (2004-2015)
 and may not be redistributed without written permission.*/
 
-//Using SDL, SDL_image, standard IO, math, and strings
+//Using SDL, SDL_image, standard IO, and strings
 #include <SDL.h>
 #include <SDL_image.h>
 #include <stdio.h>
 #include <string>
-#include <cmath>
 
 //Screen dimension constants
 const int SCREEN_WIDTH = 640;
 const int SCREEN_HEIGHT = 480;
+
+//Texture wrapper class
+class LTexture
+{
+public:
+	//Initializes variables
+	LTexture();
+
+	//Deallocates memory
+	~LTexture();
+
+	//Loads image at specified path
+	bool loadFromFile(std::string path);
+
+	//Deallocates texture
+	void free();
+
+	//Set color modulation
+	void setColor(Uint8 red, Uint8 green, Uint8 blue);
+
+	//Renders texture at given point
+	void render(int x, int y, SDL_Rect* clip = NULL);
+
+	//Gets image dimensions
+	int getWidth();
+	int getHeight();
+
+private:
+	//The actual hardware texture
+	SDL_Texture* mTexture;
+
+	//Image dimensions
+	int mWidth;
+	int mHeight;
+};
 
 //Starts up SDL and creates window
 bool init();
@@ -21,14 +55,114 @@ bool loadMedia();
 //Frees media and shuts down SDL
 void close();
 
-//Loads individual image as texture
-SDL_Texture* loadTexture(std::string path);
-
 //The window we'll be rendering to
 SDL_Window* gWindow = NULL;
 
 //The window renderer
 SDL_Renderer* gRenderer = NULL;
+
+//Scene texture
+LTexture gModulatedTexture;
+
+
+LTexture::LTexture()
+{
+	//Initialize
+	mTexture = NULL;
+	mWidth = 0;
+	mHeight = 0;
+}
+
+LTexture::~LTexture()
+{
+	//Deallocate
+	free();
+}
+
+bool LTexture::loadFromFile(std::string path)
+{
+	//Get rid of preexisting texture
+	free();
+
+	//The final texture
+	SDL_Texture* newTexture = NULL;
+
+	//Load image at specified path
+	SDL_Surface* loadedSurface = IMG_Load(path.c_str());
+	if (loadedSurface == NULL)
+	{
+		printf("Unable to load image %s! SDL_image Error: %s\n", path.c_str(), IMG_GetError());
+	}
+	else
+	{
+		//Color key image
+		SDL_SetColorKey(loadedSurface, SDL_TRUE, SDL_MapRGB(loadedSurface->format, 0, 0xFF, 0xFF));
+
+		//Create texture from surface pixels
+		newTexture = SDL_CreateTextureFromSurface(gRenderer, loadedSurface);
+		if (newTexture == NULL)
+		{
+			printf("Unable to create texture from %s! SDL Error: %s\n", path.c_str(), SDL_GetError());
+		}
+		else
+		{
+			//Get image dimensions
+			mWidth = loadedSurface->w;
+			mHeight = loadedSurface->h;
+		}
+
+		//Get rid of old loaded surface
+		SDL_FreeSurface(loadedSurface);
+	}
+
+	//Return success
+	mTexture = newTexture;
+	return mTexture != NULL;
+}
+
+void LTexture::free()
+{
+	//Free texture if it exists
+	if (mTexture != NULL)
+	{
+		SDL_DestroyTexture(mTexture);
+		mTexture = NULL;
+		mWidth = 0;
+		mHeight = 0;
+	}
+}
+
+void LTexture::setColor(Uint8 red, Uint8 green, Uint8 blue)
+{
+	//Modulate texture
+	SDL_SetTextureColorMod(mTexture, red, green, blue);
+}
+
+void LTexture::render(int x, int y, SDL_Rect* clip)
+{
+	//Set rendering space and render to screen
+	SDL_Rect renderQuad = { x, y, mWidth, mHeight };
+
+	//Set clip rendering dimensions
+	if (clip != NULL)
+	{
+		renderQuad.w = clip->w;
+		renderQuad.h = clip->h;
+	}
+
+	//Render to screen
+	SDL_RenderCopy(gRenderer, mTexture, clip, &renderQuad);
+}
+
+int LTexture::getWidth()
+{
+	return mWidth;
+}
+
+int LTexture::getHeight()
+{
+	return mHeight;
+}
 
 bool init()
 {
@@ -53,7 +187,7 @@ bool init()
 		gWindow = SDL_CreateWindow("SDL Tutorial", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
 		if (gWindow == NULL)
 		{
-			printf("Window could not be created! SDL Error: %s\n", SDL_GetError());
+			printf("Window could not be created! %s\n", SDL_GetError());
 			success = false;
 		}
 		else
@@ -89,12 +223,21 @@ bool loadMedia()
 	//Loading success flag
 	bool success = true;
 
-	//Nothing to load
+	//Load texture
+	if (!gModulatedTexture.loadFromFile("textures/colors.png"))
+	{
+		printf("Failed to load colors texture!\n");
+		success = false;
+	}
+
 	return success;
 }
 
 void close()
 {
+	//Free loaded images
+	gModulatedTexture.free();
+
 	//Destroy window	
 	SDL_DestroyRenderer(gRenderer);
 	SDL_DestroyWindow(gWindow);
@@ -104,33 +247,6 @@ void close()
 	//Quit SDL subsystems
 	IMG_Quit();
 	SDL_Quit();
-}
-
-SDL_Texture* loadTexture(std::string path)
-{
-	//The final texture
-	SDL_Texture* newTexture = NULL;
-
-	//Load image at specified path
-	SDL_Surface* loadedSurface = IMG_Load(path.c_str());
-	if (loadedSurface == NULL)
-	{
-		printf("Unable to load image %s! SDL_image Error: %s\n", path.c_str(), IMG_GetError());
-	}
-	else
-	{
-		//Create texture from surface pixels
-		newTexture = SDL_CreateTextureFromSurface(gRenderer, loadedSurface);
-		if (newTexture == NULL)
-		{
-			printf("Unable to create texture from %s! SDL Error: %s\n", path.c_str(), SDL_GetError());
-		}
-
-		//Get rid of old loaded surface
-		SDL_FreeSurface(loadedSurface);
-	}
-
-	return newTexture;
 }
 
 int main(int argc, char* args[])
@@ -155,6 +271,11 @@ int main(int argc, char* args[])
 			//Event handler
 			SDL_Event e;
 
+			//Modulation components
+			Uint8 r = 255;
+			Uint8 g = 255;
+			Uint8 b = 255;
+
 			//While application is running
 			while (!quit)
 			{
@@ -166,32 +287,51 @@ int main(int argc, char* args[])
 					{
 						quit = true;
 					}
+					//On keypress change rgb values
+					else if (e.type == SDL_KEYDOWN)
+					{
+						switch (e.key.keysym.sym)
+						{
+							//Increase red
+						case SDLK_q:
+							r += 32;
+							break;
+
+							//Increase green
+						case SDLK_w:
+							g += 32;
+							break;
+
+							//Increase blue
+						case SDLK_e:
+							b += 32;
+							break;
+
+							//Decrease red
+						case SDLK_a:
+							r -= 32;
+							break;
+
+							//Decrease green
+						case SDLK_s:
+							g -= 32;
+							break;
+
+							//Decrease blue
+						case SDLK_d:
+							b -= 32;
+							break;
+						}
+					}
 				}
 
 				//Clear screen
 				SDL_SetRenderDrawColor(gRenderer, 0xFF, 0xFF, 0xFF, 0xFF);
 				SDL_RenderClear(gRenderer);
 
-				//Render red filled quad
-				SDL_Rect fillRect = { SCREEN_WIDTH / 4, SCREEN_HEIGHT / 4, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 };
-				SDL_SetRenderDrawColor(gRenderer, 0xFF, 0x00, 0x00, 0xFF);
-				SDL_RenderFillRect(gRenderer, &fillRect);
-
-				//Render green outlined quad
-				SDL_Rect outlineRect = { SCREEN_WIDTH / 6, SCREEN_HEIGHT / 6, SCREEN_WIDTH * 2 / 3, SCREEN_HEIGHT * 2 / 3 };
-				SDL_SetRenderDrawColor(gRenderer, 0x00, 0xFF, 0x00, 0xFF);
-				SDL_RenderDrawRect(gRenderer, &outlineRect);
-
-				//Draw blue horizontal line
-				SDL_SetRenderDrawColor(gRenderer, 0x00, 0x00, 0xFF, 0xFF);
-				SDL_RenderDrawLine(gRenderer, 0, SCREEN_HEIGHT / 2, SCREEN_WIDTH, SCREEN_HEIGHT / 2);
-
-				//Draw vertical line of yellow dots
-				SDL_SetRenderDrawColor(gRenderer, 0xFF, 0xFF, 0x00, 0xFF);
-				for (int i = 0; i < SCREEN_HEIGHT; i += 4)
-				{
-					SDL_RenderDrawPoint(gRenderer, SCREEN_WIDTH / 2, i);
-				}
+				//Modulate and render texture
+				gModulatedTexture.setColor(r, g, b);
+				gModulatedTexture.render(0, 0);
 
 				//Update screen
 				SDL_RenderPresent(gRenderer);
