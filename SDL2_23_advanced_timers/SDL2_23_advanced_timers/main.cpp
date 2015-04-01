@@ -1,20 +1,17 @@
 /*This source code copyrighted by Lazy Foo' Productions (2004-2015)
 and may not be redistributed without written permission.*/
 
-//Using SDL, SDL_image, standard IO, math, and strings
+//Using SDL, SDL_image, SDL_ttf, standard IO, strings, and string streams
 #include <SDL.h>
 #include <SDL_image.h>
+#include <SDL_ttf.h>
 #include <stdio.h>
-#include <iostream>
 #include <string>
-#include <cmath>
+#include <sstream>
 
 //Screen dimension constants
 const int SCREEN_WIDTH = 640;
 const int SCREEN_HEIGHT = 480;
-
-//Analog joystick dead zone
-const int JOYSTICK_DEAD_ZONE = 8000;
 
 //Texture wrapper class
 class LTexture
@@ -62,6 +59,38 @@ private:
 	int mHeight;
 };
 
+//The application time based timer
+class LTimer
+{
+public:
+	//Initializes variables
+	LTimer();
+
+	//The various clock actions
+	void start();
+	void stop();
+	void pause();
+	void unpause();
+
+	//Gets the timer's time
+	Uint32 getTicks();
+
+	//Checks the status of the timer
+	bool isStarted();
+	bool isPaused();
+
+private:
+	//The clock time when the timer started
+	Uint32 mStartTicks;
+
+	//The ticks stored when the timer was paused
+	Uint32 mPausedTicks;
+
+	//The timer status
+	bool mPaused;
+	bool mStarted;
+};
+
 //Starts up SDL and creates window
 bool init();
 
@@ -77,12 +106,13 @@ SDL_Window* gWindow = NULL;
 //The window renderer
 SDL_Renderer* gRenderer = NULL;
 
+//Globally used font
+TTF_Font* gFont = NULL;
+
 //Scene textures
-LTexture gArrowTexture;
-
-//Game Controller 1 handler
-SDL_Joystick* gGameController = NULL;
-
+LTexture gTimeTextTexture;
+LTexture gPausePromptTexture;
+LTexture gStartPromptTexture;
 
 LTexture::LTexture()
 {
@@ -232,13 +262,115 @@ int LTexture::getHeight()
 	return mHeight;
 }
 
+LTimer::LTimer()
+{
+	//Initialize the variables
+	mStartTicks = 0;
+	mPausedTicks = 0;
+
+	mPaused = false;
+	mStarted = false;
+}
+
+void LTimer::start()
+{
+	//Start the timer
+	mStarted = true;
+
+	//Unpause the timer
+	mPaused = false;
+
+	//Get the current clock time
+	mStartTicks = SDL_GetTicks();
+	mPausedTicks = 0;
+}
+
+void LTimer::stop()
+{
+	//Stop the timer
+	mStarted = false;
+
+	//Unpause the timer
+	mPaused = false;
+
+	//Clear tick variables
+	mStartTicks = 0;
+	mPausedTicks = 0;
+}
+
+void LTimer::pause()
+{
+	//If the timer is running and isn't already paused
+	if (mStarted && !mPaused)
+	{
+		//Pause the timer
+		mPaused = true;
+
+		//Calculate the paused ticks
+		mPausedTicks = SDL_GetTicks() - mStartTicks;
+		mStartTicks = 0;
+	}
+}
+
+void LTimer::unpause()
+{
+	//If the timer is running and paused
+	if (mStarted && mPaused)
+	{
+		//Unpause the timer
+		mPaused = false;
+
+		//Reset the starting ticks
+		mStartTicks = SDL_GetTicks() - mPausedTicks;
+
+		//Reset the paused ticks
+		mPausedTicks = 0;
+	}
+}
+
+Uint32 LTimer::getTicks()
+{
+	//The actual timer time
+	Uint32 time = 0;
+
+	//If the timer is running
+	if (mStarted)
+	{
+		//If the timer is paused
+		if (mPaused)
+		{
+			//Return the number of ticks when the timer was paused
+			time = mPausedTicks;
+		}
+		else
+		{
+			//Return the current time minus the start time
+			time = SDL_GetTicks() - mStartTicks;
+		}
+	}
+
+	return time;
+}
+
+bool LTimer::isStarted()
+{
+	//Timer is running and paused or unpaused
+	return mStarted;
+}
+
+bool LTimer::isPaused()
+{
+	//Timer is running and paused
+	return mPaused && mStarted;
+}
+
 bool init()
 {
 	//Initialization flag
 	bool success = true;
 
 	//Initialize SDL
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) < 0)
+	if (SDL_Init(SDL_INIT_VIDEO) < 0)
 	{
 		printf("SDL could not initialize! SDL Error: %s\n", SDL_GetError());
 		success = false;
@@ -249,21 +381,6 @@ bool init()
 		if (!SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1"))
 		{
 			printf("Warning: Linear texture filtering not enabled!");
-		}
-
-		//Check for joysticks
-		if (SDL_NumJoysticks() < 1)
-		{
-			printf("Warning: No joysticks connected!\n");
-		}
-		else
-		{
-			//Load joystick
-			gGameController = SDL_JoystickOpen(0);
-			if (gGameController == NULL)
-			{
-				printf("Warning: Unable to open game controller! SDL Error: %s\n", SDL_GetError());
-			}
 		}
 
 		//Create window
@@ -294,6 +411,13 @@ bool init()
 					printf("SDL_image could not initialize! SDL_image Error: %s\n", IMG_GetError());
 					success = false;
 				}
+
+				//Initialize SDL_ttf
+				if (TTF_Init() == -1)
+				{
+					printf("SDL_ttf could not initialize! SDL_ttf Error: %s\n", TTF_GetError());
+					success = false;
+				}
 			}
 		}
 	}
@@ -306,11 +430,31 @@ bool loadMedia()
 	//Loading success flag
 	bool success = true;
 
-	//Load arrow texture
-	if (!gArrowTexture.loadFromFile("textures/arrow.png"))
+	//Open the font
+	gFont = TTF_OpenFont("fonts/lazy.ttf", 28);
+	if (gFont == NULL)
 	{
-		printf("Failed to load arrow texture!\n");
+		printf("Failed to load lazy font! SDL_ttf Error: %s\n", TTF_GetError());
 		success = false;
+	}
+	else
+	{
+		//Set text color as black
+		SDL_Color textColor = { 0, 0, 0, 255 };
+
+		//Load stop prompt texture
+		if (!gStartPromptTexture.loadFromRenderedText("Press S to Start or Stop the Timer", textColor))
+		{
+			printf("Unable to render start/stop prompt texture!\n");
+			success = false;
+		}
+
+		//Load pause prompt texture
+		if (!gPausePromptTexture.loadFromRenderedText("Press P to Pause or Unpause the Timer", textColor))
+		{
+			printf("Unable to render pause/unpause prompt texture!\n");
+			success = false;
+		}
 	}
 
 	return success;
@@ -319,11 +463,13 @@ bool loadMedia()
 void close()
 {
 	//Free loaded images
-	gArrowTexture.free();
+	gTimeTextTexture.free();
+	gStartPromptTexture.free();
+	gPausePromptTexture.free();
 
-	//Close game controller
-	SDL_JoystickClose(gGameController);
-	gGameController = NULL;
+	//Free global font
+	TTF_CloseFont(gFont);
+	gFont = NULL;
 
 	//Destroy window	
 	SDL_DestroyRenderer(gRenderer);
@@ -332,6 +478,7 @@ void close()
 	gRenderer = NULL;
 
 	//Quit SDL subsystems
+	TTF_Quit();
 	IMG_Quit();
 	SDL_Quit();
 }
@@ -358,9 +505,14 @@ int main(int argc, char* args[])
 			//Event handler
 			SDL_Event e;
 
-			//Normalized direction
-			int xDir = 0;
-			int yDir = 0;
+			//Set text color as black
+			SDL_Color textColor = { 0, 0, 0, 255 };
+
+			//The application timer
+			LTimer timer;
+
+			//In memory text stream
+			std::stringstream timeText;
 
 			//While application is running
 			while (!quit)
@@ -373,74 +525,56 @@ int main(int argc, char* args[])
 					{
 						quit = true;
 					}
-					else if (e.type == SDL_JOYAXISMOTION)
+					//Reset start time on return keypress
+					else if (e.type == SDL_KEYDOWN)
 					{
-						//Motion on controller 0
-						if (e.jaxis.which == 0)
+						//Start/stop
+						if (e.key.keysym.sym == SDLK_s)
 						{
-							//X axis motion
-							if (e.jaxis.axis == 0)
+							if (timer.isStarted())
 							{
-								//Left of dead zone
-								if (e.jaxis.value < -JOYSTICK_DEAD_ZONE)
-								{
-									xDir = -1;
-								}
-								//Right of dead zone
-								else if (e.jaxis.value > JOYSTICK_DEAD_ZONE)
-								{
-									xDir = 1;
-								}
-								else
-								{
-									xDir = 0;
-								}
+								timer.stop();
 							}
-							//Y axis motion
-							else if (e.jaxis.axis == 1)
+							else
 							{
-								//Below of dead zone
-								if (e.jaxis.value < -JOYSTICK_DEAD_ZONE)
-								{
-									yDir = -1;
-								}
-								//Above of dead zone
-								else if (e.jaxis.value > JOYSTICK_DEAD_ZONE)
-								{
-									yDir = 1;
-								}
-								else
-								{
-									yDir = 0;
-								}
+								timer.start();
+							}
+						}
+						//Pause/unpause
+						else if (e.key.keysym.sym == SDLK_p)
+						{
+							if (timer.isPaused())
+							{
+								timer.unpause();
+							}
+							else
+							{
+								timer.pause();
 							}
 						}
 					}
 				}
 
-				// Clear screen
+				//Set text to be rendered
+				timeText.str("");
+				timeText << "Seconds since start time " << (timer.getTicks() / 1000.f);
+
+				//Render text
+				if (!gTimeTextTexture.loadFromRenderedText(timeText.str().c_str(), textColor))
+				{
+					printf("Unable to render time texture!\n");
+				}
+
+				//Clear screen
 				SDL_SetRenderDrawColor(gRenderer, 0xFF, 0xFF, 0xFF, 0xFF);
 				SDL_RenderClear(gRenderer);
 
-				std::cout << "Position Y(" << yDir << ") Positin X(" << xDir << ")" << std::endl;
-				std::cout << "180 / PI = " << 180.0 / M_PI << std::endl;
-				std::cout << "atan2(x, y) = " << atan2((double)yDir, (double)xDir) << std::endl;
+				//Render textures
+				gStartPromptTexture.render((SCREEN_WIDTH - gStartPromptTexture.getWidth()) / 2, 0);
+				gPausePromptTexture.render((SCREEN_WIDTH - gPausePromptTexture.getWidth()) / 2, gStartPromptTexture.getHeight());
+				gTimeTextTexture.render((SCREEN_WIDTH - gTimeTextTexture.getWidth()) / 2, (SCREEN_HEIGHT - gTimeTextTexture.getHeight()) / 2);
 
-				// Calculate angle
-				double joystickAngle = atan2((double)yDir, (double)xDir) * (180.0 / M_PI);
-				
-				std::cout << joystickAngle << std::endl;
-
-				// Correct angle
-				if (xDir == 0 && yDir == 0)
-				{
-					joystickAngle = 0;
-				}
-
-				// Render joystick 8 way angle
-				gArrowTexture.render((SCREEN_WIDTH - gArrowTexture.getWidth()) / 2, (SCREEN_HEIGHT - gArrowTexture.getHeight()) / 2, NULL, joystickAngle);
-
-				// Update screen
+				//Update screen
 				SDL_RenderPresent(gRenderer);
 			}
 		}

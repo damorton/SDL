@@ -1,20 +1,17 @@
 /*This source code copyrighted by Lazy Foo' Productions (2004-2015)
 and may not be redistributed without written permission.*/
 
-//Using SDL, SDL_image, standard IO, math, and strings
+//Using SDL, SDL_image, SDL_ttf, standard IO, strings, and string streams
 #include <SDL.h>
 #include <SDL_image.h>
+#include <SDL_ttf.h>
 #include <stdio.h>
-#include <iostream>
 #include <string>
-#include <cmath>
+#include <sstream>
 
 //Screen dimension constants
 const int SCREEN_WIDTH = 640;
 const int SCREEN_HEIGHT = 480;
-
-//Analog joystick dead zone
-const int JOYSTICK_DEAD_ZONE = 8000;
 
 //Texture wrapper class
 class LTexture
@@ -77,12 +74,12 @@ SDL_Window* gWindow = NULL;
 //The window renderer
 SDL_Renderer* gRenderer = NULL;
 
+//Globally used font
+TTF_Font *gFont = NULL;
+
 //Scene textures
-LTexture gArrowTexture;
-
-//Game Controller 1 handler
-SDL_Joystick* gGameController = NULL;
-
+LTexture gTimeTextTexture;
+LTexture gPromptTextTexture;
 
 LTexture::LTexture()
 {
@@ -238,7 +235,7 @@ bool init()
 	bool success = true;
 
 	//Initialize SDL
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) < 0)
+	if (SDL_Init(SDL_INIT_VIDEO) < 0)
 	{
 		printf("SDL could not initialize! SDL Error: %s\n", SDL_GetError());
 		success = false;
@@ -249,21 +246,6 @@ bool init()
 		if (!SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1"))
 		{
 			printf("Warning: Linear texture filtering not enabled!");
-		}
-
-		//Check for joysticks
-		if (SDL_NumJoysticks() < 1)
-		{
-			printf("Warning: No joysticks connected!\n");
-		}
-		else
-		{
-			//Load joystick
-			gGameController = SDL_JoystickOpen(0);
-			if (gGameController == NULL)
-			{
-				printf("Warning: Unable to open game controller! SDL Error: %s\n", SDL_GetError());
-			}
 		}
 
 		//Create window
@@ -294,6 +276,13 @@ bool init()
 					printf("SDL_image could not initialize! SDL_image Error: %s\n", IMG_GetError());
 					success = false;
 				}
+
+				//Initialize SDL_ttf
+				if (TTF_Init() == -1)
+				{
+					printf("SDL_ttf could not initialize! SDL_ttf Error: %s\n", TTF_GetError());
+					success = false;
+				}
 			}
 		}
 	}
@@ -306,11 +295,24 @@ bool loadMedia()
 	//Loading success flag
 	bool success = true;
 
-	//Load arrow texture
-	if (!gArrowTexture.loadFromFile("textures/arrow.png"))
+	//Open the font
+	gFont = TTF_OpenFont("fonts/lazy.ttf", 28);
+	if (gFont == NULL)
 	{
-		printf("Failed to load arrow texture!\n");
+		printf("Failed to load lazy font! SDL_ttf Error: %s\n", TTF_GetError());
 		success = false;
+	}
+	else
+	{
+		//Set text color as black
+		SDL_Color textColor = { 0, 0, 0, 255 };
+
+		//Load prompt texture
+		if (!gPromptTextTexture.loadFromRenderedText("Press Enter to Reset Start Time.", textColor))
+		{
+			printf("Unable to render prompt texture!\n");
+			success = false;
+		}
 	}
 
 	return success;
@@ -319,11 +321,12 @@ bool loadMedia()
 void close()
 {
 	//Free loaded images
-	gArrowTexture.free();
+	gTimeTextTexture.free();
+	gPromptTextTexture.free();
 
-	//Close game controller
-	SDL_JoystickClose(gGameController);
-	gGameController = NULL;
+	//Free global font
+	TTF_CloseFont(gFont);
+	gFont = NULL;
 
 	//Destroy window	
 	SDL_DestroyRenderer(gRenderer);
@@ -332,6 +335,7 @@ void close()
 	gRenderer = NULL;
 
 	//Quit SDL subsystems
+	TTF_Quit();
 	IMG_Quit();
 	SDL_Quit();
 }
@@ -358,9 +362,14 @@ int main(int argc, char* args[])
 			//Event handler
 			SDL_Event e;
 
-			//Normalized direction
-			int xDir = 0;
-			int yDir = 0;
+			//Set text color as black
+			SDL_Color textColor = { 0, 0, 0, 255 };
+
+			//Current time start time
+			Uint32 startTime = 0;
+
+			//In memory text stream
+			std::stringstream timeText;
 
 			//While application is running
 			while (!quit)
@@ -373,74 +382,32 @@ int main(int argc, char* args[])
 					{
 						quit = true;
 					}
-					else if (e.type == SDL_JOYAXISMOTION)
+					//Reset start time on return keypress
+					else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_RETURN)
 					{
-						//Motion on controller 0
-						if (e.jaxis.which == 0)
-						{
-							//X axis motion
-							if (e.jaxis.axis == 0)
-							{
-								//Left of dead zone
-								if (e.jaxis.value < -JOYSTICK_DEAD_ZONE)
-								{
-									xDir = -1;
-								}
-								//Right of dead zone
-								else if (e.jaxis.value > JOYSTICK_DEAD_ZONE)
-								{
-									xDir = 1;
-								}
-								else
-								{
-									xDir = 0;
-								}
-							}
-							//Y axis motion
-							else if (e.jaxis.axis == 1)
-							{
-								//Below of dead zone
-								if (e.jaxis.value < -JOYSTICK_DEAD_ZONE)
-								{
-									yDir = -1;
-								}
-								//Above of dead zone
-								else if (e.jaxis.value > JOYSTICK_DEAD_ZONE)
-								{
-									yDir = 1;
-								}
-								else
-								{
-									yDir = 0;
-								}
-							}
-						}
+						startTime = SDL_GetTicks();
 					}
 				}
 
-				// Clear screen
+				//Set text to be rendered
+				timeText.str("");
+				timeText << "Milliseconds since start time " << SDL_GetTicks() - startTime;
+
+				//Render text
+				if (!gTimeTextTexture.loadFromRenderedText(timeText.str().c_str(), textColor))
+				{
+					printf("Unable to render time texture!\n");
+				}
+
+				//Clear screen
 				SDL_SetRenderDrawColor(gRenderer, 0xFF, 0xFF, 0xFF, 0xFF);
 				SDL_RenderClear(gRenderer);
 
-				std::cout << "Position Y(" << yDir << ") Positin X(" << xDir << ")" << std::endl;
-				std::cout << "180 / PI = " << 180.0 / M_PI << std::endl;
-				std::cout << "atan2(x, y) = " << atan2((double)yDir, (double)xDir) << std::endl;
+				//Render textures
+				gPromptTextTexture.render((SCREEN_WIDTH - gPromptTextTexture.getWidth()) / 2, 0);
+				gTimeTextTexture.render((SCREEN_WIDTH - gPromptTextTexture.getWidth()) / 2, (SCREEN_HEIGHT - gPromptTextTexture.getHeight()) / 2);
 
-				// Calculate angle
-				double joystickAngle = atan2((double)yDir, (double)xDir) * (180.0 / M_PI);
-				
-				std::cout << joystickAngle << std::endl;
-
-				// Correct angle
-				if (xDir == 0 && yDir == 0)
-				{
-					joystickAngle = 0;
-				}
-
-				// Render joystick 8 way angle
-				gArrowTexture.render((SCREEN_WIDTH - gArrowTexture.getWidth()) / 2, (SCREEN_HEIGHT - gArrowTexture.getHeight()) / 2, NULL, joystickAngle);
-
-				// Update screen
+				//Update screen
 				SDL_RenderPresent(gRenderer);
 			}
 		}

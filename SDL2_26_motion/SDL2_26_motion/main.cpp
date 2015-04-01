@@ -1,20 +1,15 @@
 /*This source code copyrighted by Lazy Foo' Productions (2004-2015)
 and may not be redistributed without written permission.*/
 
-//Using SDL, SDL_image, standard IO, math, and strings
+//Using SDL, SDL_image, standard IO, and strings
 #include <SDL.h>
 #include <SDL_image.h>
 #include <stdio.h>
-#include <iostream>
 #include <string>
-#include <cmath>
 
 //Screen dimension constants
 const int SCREEN_WIDTH = 640;
 const int SCREEN_HEIGHT = 480;
-
-//Analog joystick dead zone
-const int JOYSTICK_DEAD_ZONE = 8000;
 
 //Texture wrapper class
 class LTexture
@@ -62,6 +57,69 @@ private:
 	int mHeight;
 };
 
+//The application time based timer
+class LTimer
+{
+public:
+	//Initializes variables
+	LTimer();
+
+	//The various clock actions
+	void start();
+	void stop();
+	void pause();
+	void unpause();
+
+	//Gets the timer's time
+	Uint32 getTicks();
+
+	//Checks the status of the timer
+	bool isStarted();
+	bool isPaused();
+
+private:
+	//The clock time when the timer started
+	Uint32 mStartTicks;
+
+	//The ticks stored when the timer was paused
+	Uint32 mPausedTicks;
+
+	//The timer status
+	bool mPaused;
+	bool mStarted;
+};
+
+//The dot that will move around on the screen
+class Dot
+{
+public:
+	//The dimensions of the dot
+	static const int DOT_WIDTH = 20;
+	static const int DOT_HEIGHT = 20;
+
+	//Maximum axis velocity of the dot
+	static const int DOT_VEL = 10;
+
+	//Initializes the variables
+	Dot();
+
+	//Takes key presses and adjusts the dot's velocity
+	void handleEvent(SDL_Event& e);
+
+	//Moves the dot
+	void move();
+
+	//Shows the dot on the screen
+	void render();
+
+private:
+	//The X and Y offsets of the dot
+	int mPosX, mPosY;
+
+	//The velocity of the dot
+	int mVelX, mVelY;
+};
+
 //Starts up SDL and creates window
 bool init();
 
@@ -78,11 +136,7 @@ SDL_Window* gWindow = NULL;
 SDL_Renderer* gRenderer = NULL;
 
 //Scene textures
-LTexture gArrowTexture;
-
-//Game Controller 1 handler
-SDL_Joystick* gGameController = NULL;
-
+LTexture gDotTexture;
 
 LTexture::LTexture()
 {
@@ -232,13 +286,82 @@ int LTexture::getHeight()
 	return mHeight;
 }
 
+
+Dot::Dot()
+{
+	//Initialize the offsets
+	mPosX = 0;
+	mPosY = 0;
+
+	//Initialize the velocity
+	mVelX = 0;
+	mVelY = 0;
+}
+
+void Dot::handleEvent(SDL_Event& e)
+{
+	//If a key was pressed
+	if (e.type == SDL_KEYDOWN && e.key.repeat == 0)
+	{
+		//Adjust the velocity
+		switch (e.key.keysym.sym)
+		{
+		case SDLK_UP: mVelY -= DOT_VEL; break;
+		case SDLK_DOWN: mVelY += DOT_VEL; break;
+		case SDLK_LEFT: mVelX -= DOT_VEL; break;
+		case SDLK_RIGHT: mVelX += DOT_VEL; break;
+		}
+	}
+	//If a key was released
+	else if (e.type == SDL_KEYUP && e.key.repeat == 0)
+	{
+		//Adjust the velocity
+		switch (e.key.keysym.sym)
+		{
+		case SDLK_UP: mVelY += DOT_VEL; break;
+		case SDLK_DOWN: mVelY -= DOT_VEL; break;
+		case SDLK_LEFT: mVelX += DOT_VEL; break;
+		case SDLK_RIGHT: mVelX -= DOT_VEL; break;
+		}
+	}
+}
+
+void Dot::move()
+{
+	//Move the dot left or right
+	mPosX += mVelX;
+
+	//If the dot went too far to the left or right
+	if ((mPosX < 0) || (mPosX + DOT_WIDTH > SCREEN_WIDTH))
+	{
+		//Move back
+		mPosX -= mVelX;
+	}
+
+	//Move the dot up or down
+	mPosY += mVelY;
+
+	//If the dot went too far up or down
+	if ((mPosY < 0) || (mPosY + DOT_HEIGHT > SCREEN_HEIGHT))
+	{
+		//Move back
+		mPosY -= mVelY;
+	}
+}
+
+void Dot::render()
+{
+	//Show the dot
+	gDotTexture.render(mPosX, mPosY);
+}
+
 bool init()
 {
 	//Initialization flag
 	bool success = true;
 
 	//Initialize SDL
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) < 0)
+	if (SDL_Init(SDL_INIT_VIDEO) < 0)
 	{
 		printf("SDL could not initialize! SDL Error: %s\n", SDL_GetError());
 		success = false;
@@ -249,21 +372,6 @@ bool init()
 		if (!SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1"))
 		{
 			printf("Warning: Linear texture filtering not enabled!");
-		}
-
-		//Check for joysticks
-		if (SDL_NumJoysticks() < 1)
-		{
-			printf("Warning: No joysticks connected!\n");
-		}
-		else
-		{
-			//Load joystick
-			gGameController = SDL_JoystickOpen(0);
-			if (gGameController == NULL)
-			{
-				printf("Warning: Unable to open game controller! SDL Error: %s\n", SDL_GetError());
-			}
 		}
 
 		//Create window
@@ -306,10 +414,10 @@ bool loadMedia()
 	//Loading success flag
 	bool success = true;
 
-	//Load arrow texture
-	if (!gArrowTexture.loadFromFile("textures/arrow.png"))
+	//Load dot texture
+	if (!gDotTexture.loadFromFile("sprites/dot.bmp"))
 	{
-		printf("Failed to load arrow texture!\n");
+		printf("Failed to load dot texture!\n");
 		success = false;
 	}
 
@@ -319,11 +427,7 @@ bool loadMedia()
 void close()
 {
 	//Free loaded images
-	gArrowTexture.free();
-
-	//Close game controller
-	SDL_JoystickClose(gGameController);
-	gGameController = NULL;
+	gDotTexture.free();
 
 	//Destroy window	
 	SDL_DestroyRenderer(gRenderer);
@@ -358,9 +462,8 @@ int main(int argc, char* args[])
 			//Event handler
 			SDL_Event e;
 
-			//Normalized direction
-			int xDir = 0;
-			int yDir = 0;
+			//The dot that will be moving around on the screen
+			Dot dot;
 
 			//While application is running
 			while (!quit)
@@ -373,74 +476,22 @@ int main(int argc, char* args[])
 					{
 						quit = true;
 					}
-					else if (e.type == SDL_JOYAXISMOTION)
-					{
-						//Motion on controller 0
-						if (e.jaxis.which == 0)
-						{
-							//X axis motion
-							if (e.jaxis.axis == 0)
-							{
-								//Left of dead zone
-								if (e.jaxis.value < -JOYSTICK_DEAD_ZONE)
-								{
-									xDir = -1;
-								}
-								//Right of dead zone
-								else if (e.jaxis.value > JOYSTICK_DEAD_ZONE)
-								{
-									xDir = 1;
-								}
-								else
-								{
-									xDir = 0;
-								}
-							}
-							//Y axis motion
-							else if (e.jaxis.axis == 1)
-							{
-								//Below of dead zone
-								if (e.jaxis.value < -JOYSTICK_DEAD_ZONE)
-								{
-									yDir = -1;
-								}
-								//Above of dead zone
-								else if (e.jaxis.value > JOYSTICK_DEAD_ZONE)
-								{
-									yDir = 1;
-								}
-								else
-								{
-									yDir = 0;
-								}
-							}
-						}
-					}
+
+					//Handle input for the dot
+					dot.handleEvent(e);
 				}
 
-				// Clear screen
+				//Move the dot
+				dot.move();
+
+				//Clear screen
 				SDL_SetRenderDrawColor(gRenderer, 0xFF, 0xFF, 0xFF, 0xFF);
 				SDL_RenderClear(gRenderer);
 
-				std::cout << "Position Y(" << yDir << ") Positin X(" << xDir << ")" << std::endl;
-				std::cout << "180 / PI = " << 180.0 / M_PI << std::endl;
-				std::cout << "atan2(x, y) = " << atan2((double)yDir, (double)xDir) << std::endl;
+				//Render objects
+				dot.render();
 
-				// Calculate angle
-				double joystickAngle = atan2((double)yDir, (double)xDir) * (180.0 / M_PI);
-				
-				std::cout << joystickAngle << std::endl;
-
-				// Correct angle
-				if (xDir == 0 && yDir == 0)
-				{
-					joystickAngle = 0;
-				}
-
-				// Render joystick 8 way angle
-				gArrowTexture.render((SCREEN_WIDTH - gArrowTexture.getWidth()) / 2, (SCREEN_HEIGHT - gArrowTexture.getHeight()) / 2, NULL, joystickAngle);
-
-				// Update screen
+				//Update screen
 				SDL_RenderPresent(gRenderer);
 			}
 		}
